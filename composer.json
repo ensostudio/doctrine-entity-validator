@@ -1,0 +1,32 @@
+{
+  "name": "ensostudio/doctrine-entity-validator",
+  "type": "library",
+  "homepage": "https://github.com/ensostudio/doctrine-entity-validator",
+  "description": "Entity validator for Doctrine ORM 3",
+  "keywords": ["doctrine", "orm", "entity", "validator", "php"],
+  "license": "BSD-3-Clause",
+  "authors": [
+    {
+      "name": "Enso studio",
+      "email": "info@ensostudio.ru",
+      "role": "developer"
+    }
+  ],
+  "require": {
+    "php": ">=8.1",
+    "doctrine/orm": "^3.3.2"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^9.6.22"
+  },
+  "autoload": {
+    "psr-4": {
+      "EnsoStudio\\Doctrine\\ORM\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "EnsoStudio\\Doctrine\\ORM\\": "tests/"
+    }
+  }
+}
