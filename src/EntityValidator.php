@@ -159,21 +159,6 @@ class EntityValidator
 
         $isInvalid = false;
 
-        if ($attribute->type == Types::ASCII_STRING) {
-            if (strlen($value) > $attribute->length) {
-                $isInvalid = true;
-            }
-        } elseif (mb_strlen($value, $attribute->options['charset'] ?? null) > $attribute->length) {
-            $isInvalid = true;
-        }
-        if ($isInvalid) {
-            throw new EntityValidationException(
-                ['%s is too long (max: %d chars)', $propertyName, $attribute->length],
-                $propertyName,
-                $this->entity
-            );
-        }
-
         if (!empty($attribute->options['fixed'])) {
             if ($attribute->type == Types::ASCII_STRING) {
                 if (strlen($value) != $attribute->length) {
@@ -189,6 +174,21 @@ class EntityValidator
                     $this->entity
                 );
             }
+        }
+
+        if ($attribute->type == Types::ASCII_STRING) {
+            if (strlen($value) > $attribute->length) {
+                $isInvalid = true;
+            }
+        } elseif (mb_strlen($value, $attribute->options['charset'] ?? null) > $attribute->length) {
+            $isInvalid = true;
+        }
+        if ($isInvalid) {
+            throw new EntityValidationException(
+                ['%s is too long (max: %d chars)', $propertyName, $attribute->length],
+                $propertyName,
+                $this->entity
+            );
         }
     }
 
@@ -215,7 +215,7 @@ class EntityValidator
         }
         if ($isInvalid) {
             throw new EntityValidationException(
-                ['%s is invalid enum value', $propertyName],
+                ['%s have invalid enum value', $propertyName],
                 $propertyName,
                 $this->entity
             );
