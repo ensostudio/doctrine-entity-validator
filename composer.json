@@ -3,7 +3,7 @@
   "type": "library",
   "homepage": "https://github.com/ensostudio/doctrine-entity-validator",
   "description": "Entity validator for Doctrine ORM 3",
-  "keywords": ["doctrine", "orm", "entity", "validator", "php"],
+  "keywords": ["doctrine", "orm", "entity", "validator", "validate", "php"],
   "license": "BSD-3-Clause",
   "authors": [
     {

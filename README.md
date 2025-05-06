@@ -4,6 +4,21 @@ By default, entity validation based on attached `\Doctrine\ORM\Mapping\Column` a
 
 Also, you can add custom validators by `EntityValidator::addValidator()`.
 
+Validator skip validation:
+- If `Column` attribute declared as not `updatable` and/or `insertable
+- Validation on persist/insert and property have `\Doctrine\ORM\Mapping\Id` attribute
+
+Validator checks:
+- If property value is null (or not defined), but `Column` attribute not declared as `nullable` or don't have default value (`options: ['default' => '...']`)
+- If `Column` attribute have **numeric** type (integer, float, decimal and etc.):
+  - If defined `unsigned` option, then property value must be more than zero
+  - If type `decimal` and defined `precision`, then check size of value
+- If `Column` attribute have **string** type (sting, text and etc.):
+  - If defined `fixed` option and `length`, then check string length
+  - If defined only `length`, then check string length
+- If `Column` attribute have **enum** type:
+  - If defined `enumType`, then check is proprerty value is declared in enum class
+
 ## Example
 
 Validates `Product` entity before insert/update data:
