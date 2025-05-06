@@ -5,7 +5,7 @@ By default, entity validation based on attached `\Doctrine\ORM\Mapping\Column` a
 Also, you can add custom validators by `EntityValidator::addValidator()`.
 
 Validator skip validation:
-- If `Column` attribute declared as not `updatable` and/or `insertable
+- If `Column` attribute declared as not `updatable` and/or `insertable`
 - Validation on persist/insert and property have `\Doctrine\ORM\Mapping\Id` attribute
 
 Validator checks:
