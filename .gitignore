@@ -1,7 +1,8 @@
-/.idea/
-/vendor/
+.idea/
+vendor/
 *.phar
 *.lock
 *.te?mp
 *.log
+*.cache
 
