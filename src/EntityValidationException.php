@@ -22,7 +22,7 @@ class EntityValidationException extends RuntimeException
      * @param string $targetProperty The name of target property (column)
      * @param object $targetEntity The target entity
      * @param int $code The exception code
-     * @raram Throwable|null $previous The previous throwable used for the exception chaining
+     * @param Throwable|null $previous The previous throwable used for the exception chaining
      */
     public function __construct(
         array $message,
