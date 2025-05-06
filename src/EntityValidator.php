@@ -4,31 +4,45 @@ namespace EnsoStudio\Doctrine\ORM;
 
 use Doctrine\ORM\Mapping as ORM;
 use Doctrine\DBAL\Types\Types;
+use EnsoStudio\Doctrine\ORM\ColumnValidators\ColumnValidator;
 use InvalidArgumentException;
 use ReflectionObject;
+use ReflectionProperty;
 
 /**
  * The validator for Doctrine ORM entities.
  *
- * By default, entity validation based on attached `\Doctrine\ORM\Mapping\Column` attributes.
+ * By default, entity validation based on attached `\Doctrine\ORM\Mapping\Column` attributes and attributes inherited
+ * {@see ColumnValidator} interface.
  * Also, you can {@see self::addValidator() add custom validators}.
  */
 class EntityValidator
 {
-    private object $entity;
-
-    private ReflectionObject $reflection;
+    private readonly object $entity;
 
     /**
-     * @var array<string, callable[]> The custom property validators
+     * @var bool If true, caches column's propeties and attributes by entity class
+     */
+    private readonly bool $useCache;
+
+    private readonly ReflectionObject $reflection;
+
+    /**
+     * @var array<string, callable[]> The custom property validators grouped by property name
      */
     private array $validators = [];
 
     /**
+     * @var array<class-string, array[]>
+     */
+    protected static array $entityColumnCache = [];
+
+    /**
      * @param object $entity The entity instance
+     * @param bool $useCache If true, caches column's propeties and attributes by entity class
      * @throws InvalidArgumentException If `$entity` class don't have `\Doctrine\ORM\Mapping\Entity` attribute
      */
-    public function __construct(object $entity)
+    public function __construct(object $entity, bool $useCache = false)
     {
         $reflection = new ReflectionObject($entity);
         if (!$reflection->getAttributes(ORM\Entity::class)) {
@@ -36,6 +50,7 @@ class EntityValidator
         }
 
         $this->entity = $entity;
+        $this->useCache = $useCache;
         $this->reflection = $reflection;
     }
 
@@ -62,13 +77,55 @@ class EntityValidator
     }
 
     /**
+     * Validates values of column properties.
+     *
      * @param bool $onUpdate If true, then is entity update, else is entity persist/insert
      * @throws EntityValidationException If property value is invalid
      */
     public function validate(bool $onUpdate = false): void
     {
+        /**
+         * @var ReflectionProperty $property
+         * @var ORM\Column $columnAttribute
+         * @var ColumnValidator[] $validatorAttributes
+         */
+        foreach ($this->findColumns() as [$property, $columnAttribute, $validatorAttributes]) {
+            if ($onUpdate) {
+                if (!$columnAttribute->updatable) {
+                    continue;
+                }
+            } elseif (!$columnAttribute->insertable) {
+                continue;
+            }
+
+            $value = $property->isInitialized($this->entity) ? $property->getValue($this->entity) : null;
+
+            // Ignores ID columns on persist/insert
+            if (!$onUpdate && $value === null && $property->getAttributes(ORM\Id::class)) {
+                continue;
+            }
+
+            $validatorAttributes = $this->filterValidatorAttributesByEvent($validatorAttributes, $onUpdate);
+
+            $this->validateColumn($value, $property->getName(), $columnAttribute, $validatorAttributes);
+        }
+    }
+
+    /**
+     * @return array<int, array> An array of [ReflectionProperty, Column attribute, ColumnValidator attributes] pairs
+     */
+    private function findColumns(): array
+    {
+        $entityClass = $this->reflection->getName();
+
+        if (isset(self::$entityColumnCache[$entityClass])) {
+            return self::$entityColumnCache[$entityClass];
+        }
+
+        $columns = [];
+
         $properties = $this->reflection->getProperties(
-            \ReflectionProperty::IS_PROTECTED | \ReflectionProperty::IS_PRIVATE
+            ReflectionProperty::IS_PUBLIC | ReflectionProperty::IS_PROTECTED | ReflectionProperty::IS_PRIVATE
         );
         foreach ($properties as $property) {
             if ($property->isStatic() || $property->isReadOnly() || !$property->isDefault()) {
@@ -80,50 +137,91 @@ class EntityValidator
                 continue;
             }
             /** @var ORM\Column $attribute */
-            $attribute = $attributes[0]->newInstance();
-            if (($onUpdate && !$attribute->updatable) || (!$onUpdate && !$attribute->insertable)) {
-                continue;
+            $columnAttribute = $attributes[0]->newInstance();
+
+            $validatorAttributes = [];
+            $attributes = $property->getAttributes(
+                ColumnValidator::class,
+                \ReflectionAttribute::IS_INSTANCEOF
+            );
+            foreach ($attributes as $attribute) {
+                /** @var ColumnValidator $validatorAttribute */
+                $validatorAttribute = $attribute->newInstance();
+                $validatorAttributes[] = $validatorAttribute;
             }
 
-            $value = $property->isInitialized($this->entity) ? $property->getValue($this->entity) : null;
-
-            // Ignore ID columns on persis/insert
-            if (!$onUpdate && $value === null && $property->getAttributes(ORM\Id::class)) {
-                continue;
-            }
-
-            $this->validateColumn($value, $property->getName(), $attribute);
+            $columns[] = [$property, $columnAttribute, $validatorAttributes];
         }
+
+        if ($this->useCache) {
+            self::$entityColumnCache[$entityClass] = $columns;
+        }
+
+        return $columns;
     }
 
-    private function validateColumn(mixed $value, string $propertyName, ORM\Column $attribute): void
+    /**
+     * Returns validator attributes filtered by event.
+     *
+     * @param ColumnValidator[] $validatorAttributes An array of column's validator attributes
+     * @param bool $onUpdate If true, then is entity update, else is entity persist/insert
+     * @return ColumnValidator[]
+     */
+    private function filterValidatorAttributesByEvent(array $validatorAttributes, bool $onUpdate): array
     {
+        foreach ($validatorAttributes as $key => $validatorAttribute) {
+            if ($onUpdate) {
+                if (!$validatorAttribute->onUpdate) {
+                    unset($validatorAttributes[$key]);
+                }
+            } elseif (!$validatorAttribute->onPersist) {
+                unset($validatorAttributes[$key]);
+            }
+        }
+
+        return $validatorAttributes;
+    }
+
+    /**
+     * @param ColumnValidator[] $validatorAttributes
+     */
+    private function validateColumn(
+        mixed $value,
+        string $propertyName,
+        ORM\Column $columnAttribute,
+        array $validatorAttributes
+    ): void {
         if ($value === null) {
-            if (!$attribute->nullable && !isset($attribute->options['default'])) {
+            if (!$columnAttribute->nullable && !array_key_exists('default', $columnAttribute->options)) {
                 throw new EntityValidationException(['%s is empty', $propertyName], $propertyName, $this->entity);
             }
-            // Skip validation if column is empty and not required
+            // Skip validation if column value is empty but not required
             return;
         }
 
-        switch ($attribute->type) {
+        switch ($columnAttribute->type) {
             case Types::BIGINT:
             case Types::DECIMAL:
             case Types::FLOAT:
             case Types::INTEGER:
             case Types::SMALLFLOAT:
             case Types::SMALLINT:
-                $this->validateNumericColumn($value, $propertyName, $attribute);
+                $this->validateNumericColumn($value, $propertyName, $columnAttribute);
                 break;
 
             case Types::ASCII_STRING:
             case Types::STRING:
             case Types::TEXT:
-                $this->validateStringColumn($value, $propertyName, $attribute);
+            case Types::GUID:
+                $this->validateStringColumn($value, $propertyName, $columnAttribute);
                 break;
 
             case Types::ENUM:
-                $this->validateEnumColumn($value, $propertyName, $attribute);
+                $this->validateEnumColumn($value, $propertyName, $columnAttribute);
+        }
+
+        foreach ($validatorAttributes as $validatorAttribute) {
+            $validatorAttribute->validate($value, $propertyName, $this->entity);
         }
 
         foreach ($this->validators[$propertyName] ?? [] as $validator) {
