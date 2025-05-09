@@ -28,6 +28,7 @@ Validator checks by column type:
 - [Greater](src/ColumnValidators/Greater.php)
 - [Number](src/ColumnValidators/Number.php)
 - [Regexp](src/ColumnValidators/Regexp.php)
+- [Type](src/ColumnValidators/Type.php)
 - [Filter](src/ColumnValidators/Filter.php)
 - [Slug](src/ColumnValidators/Slug.php)
 - [Ip](src/ColumnValidators/Ip.php)
@@ -58,6 +59,7 @@ class Product
     private string $slug;
 
     #[ORM\Column(type: Types::STRING, length: 150)]
+    #[ColumnValidators\Type('print')]
     private string $name;
 
     #[ORM\PrePersist]
