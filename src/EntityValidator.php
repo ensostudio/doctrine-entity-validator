@@ -2,8 +2,10 @@
 
 namespace EnsoStudio\Doctrine\ORM;
 
+use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping as ORM;
 use Doctrine\DBAL\Types\Types;
+use Doctrine\Persistence\Event\LifecycleEventArgs;
 use EnsoStudio\Doctrine\ORM\ColumnValidators\ColumnValidator;
 use InvalidArgumentException;
 use ReflectionObject;
@@ -15,15 +17,19 @@ use ReflectionProperty;
  * By default, entity validation based on attached `\Doctrine\ORM\Mapping\Column` attributes and attributes inherited
  * {@see ColumnValidator} interface.
  * Also, you can {@see self::addValidator() add custom validators}.
+ *
+ * @event postValidate The event triggers after successful validation, the syntax of listener callback:
+ *     `function (LifecycleEventArgs $args): void`
  */
 class EntityValidator
 {
+    public const EVENT_POST_VALIDATE = 'postValidate';
+
     private readonly object $entity;
 
-    /**
-     * @var bool If true, caches column's propeties and attributes by entity class
-     */
     private readonly bool $useCache;
+
+    private readonly ?EntityManagerInterface $entityManager;
 
     private readonly ReflectionObject $reflection;
 
@@ -40,18 +46,15 @@ class EntityValidator
     /**
      * @param object $entity The entity instance
      * @param bool $useCache If true, caches column's propeties and attributes by entity class
-     * @throws InvalidArgumentException If `$entity` class don't have `\Doctrine\ORM\Mapping\Entity` attribute
+     * @param EntityManagerInterface|null $entityManager The entity manager using to dispatch
+     *     {@see self::EVENT_POST_VALIDATE postValidate} event
      */
-    public function __construct(object $entity, bool $useCache = false)
+    public function __construct(object $entity, bool $useCache = false, ?EntityManagerInterface $entityManager = null)
     {
-        $reflection = new ReflectionObject($entity);
-        if (!$reflection->getAttributes(ORM\Entity::class)) {
-            throw new InvalidArgumentException(get_class($entity) . ' is not entity class');
-        }
-
         $this->entity = $entity;
         $this->useCache = $useCache;
-        $this->reflection = $reflection;
+        $this->entityManager = $entityManager;
+        $this->reflection = new ReflectionObject($entity);
     }
 
     /**
@@ -108,6 +111,14 @@ class EntityValidator
             $validatorAttributes = $this->filterValidatorAttributesByEvent($validatorAttributes, $onUpdate);
 
             $this->validateColumn($value, $property->getName(), $columnAttribute, $validatorAttributes);
+
+            if (isset($this->entityManager)) {
+                $this->entityManager->getEventManager()
+                    ->dispatchEvent(
+                        self::EVENT_POST_VALIDATE,
+                        new LifecycleEventArgs($this->entity, $this->entityManager)
+                    );
+            }
         }
     }
 
@@ -192,7 +203,7 @@ class EntityValidator
         array $validatorAttributes
     ): void {
         if ($value === null) {
-            if (!$columnAttribute->nullable && !array_key_exists('default', $columnAttribute->options)) {
+            if (!$columnAttribute->nullable && !isset($columnAttribute->options['default'])) {
                 throw new EntityValidationException(['%s is empty', $propertyName], $propertyName, $this->entity);
             }
             // Skip validation if column value is empty but not required
@@ -200,12 +211,13 @@ class EntityValidator
         }
 
         switch ($columnAttribute->type) {
-            case Types::BIGINT:
-            case Types::DECIMAL:
             case Types::FLOAT:
             case Types::INTEGER:
             case Types::SMALLFLOAT:
             case Types::SMALLINT:
+            // this values stores as strings, but we check they as numbers
+            case Types::BIGINT:
+            case Types::DECIMAL:
                 $this->validateNumericColumn($value, $propertyName, $columnAttribute);
                 break;
 
@@ -218,6 +230,14 @@ class EntityValidator
 
             case Types::ENUM:
                 $this->validateEnumColumn($value, $propertyName, $columnAttribute);
+                break;
+
+            case Types::SIMPLE_ARRAY:
+                $this->validateArrayColumn($value, $propertyName, $columnAttribute);
+                break;
+
+            case Types::BLOB:
+                $this->validateBlobColumn($value, $propertyName);
         }
 
         foreach ($validatorAttributes as $validatorAttribute) {
@@ -236,12 +256,14 @@ class EntityValidator
         }
 
         if ($attribute->type == Types::DECIMAL && !empty($attribute->precision)) {
-            $value = !empty($attribute->scale)
-                ? number_format($value, $attribute->scale, '.', '')
-                : (string) $value;
+            if (!is_string($value)) {
+                $value = !empty($attribute->scale)
+                    ? number_format($value, $attribute->scale, '.', '')
+                    : (string) $value;
+            }
             if (strlen($value) > $attribute->precision) {
                 throw new EntityValidationException(
-                    ['%s is very big (max: %d digits)', $propertyName, $attribute->precision],
+                    ['%s is very big (maximum %d digits)', $propertyName, $attribute->precision],
                     $propertyName,
                     $this->entity
                 );
@@ -267,7 +289,7 @@ class EntityValidator
             }
             if ($isInvalid) {
                 throw new EntityValidationException(
-                    ['%s has wrong length (must be %d chars)', $propertyName, $attribute->length],
+                    ['%s has wrong length (must be %d characters)', $propertyName, $attribute->length],
                     $propertyName,
                     $this->entity
                 );
@@ -283,7 +305,7 @@ class EntityValidator
         }
         if ($isInvalid) {
             throw new EntityValidationException(
-                ['%s is too long (max: %d chars)', $propertyName, $attribute->length],
+                ['%s is too long (more than %d characters)', $propertyName, $attribute->length],
                 $propertyName,
                 $this->entity
             );
@@ -304,7 +326,7 @@ class EntityValidator
         } else {
             $isEnumCase = in_array($value, array_column($attribute->enumType::cases(), 'name'));
             if (is_a($attribute->enumType, \BackedEnum::class, true)) {
-                if ($attribute->enumType::tryFrom($value) === null && !$isEnumCase) {
+                if (!$isEnumCase && $attribute->enumType::tryFrom($value) === null) {
                     $isInvalid = true;
                 }
             } elseif (!$isEnumCase) {
@@ -313,7 +335,57 @@ class EntityValidator
         }
         if ($isInvalid) {
             throw new EntityValidationException(
-                ['%s have invalid enum value', $propertyName],
+                ['%s has invalid enum value', $propertyName],
+                $propertyName,
+                $this->entity
+            );
+        }
+    }
+
+    private function validateArrayColumn(mixed $value, string $propertyName, ORM\Column $attribute): void
+    {
+        if (!is_array($value)) {
+            throw new EntityValidationException(
+                ['%s has a wrong type of value', $propertyName],
+                $propertyName,
+                $this->entity
+            );
+        }
+
+        foreach ($value as $item) {
+            if (is_array($item) || (is_object($item) && !method_exists($item, '__toString'))) {
+                throw new EntityValidationException(
+                    ['%s has not scalar type of item', $propertyName],
+                    $propertyName,
+                    $this->entity
+                );
+            }
+            if ((is_string($item) || is_object($item)) && str_contains((string) $item, ',')) {
+                throw new EntityValidationException(
+                    ['%s has item containing comma', $propertyName],
+                    $propertyName,
+                    $this->entity
+                );
+            }
+        }
+
+        if ($attribute->length) {
+            $length = mb_strlen(implode(',', $value), $attribute->options['charset'] ?? null);
+            if ($length > $attribute->length) {
+                throw new EntityValidationException(
+                    ['%s is too long (more than %d characters)', $propertyName, $attribute->length],
+                    $propertyName,
+                    $this->entity
+                );
+            }
+        }
+    }
+
+    private function validateBlobColumn(mixed $value, string $propertyName): void
+    {
+        if (!is_resource($value)) {
+            throw new EntityValidationException(
+                ['%s has invalid type (must be resource)', $propertyName],
                 $propertyName,
                 $this->entity
             );

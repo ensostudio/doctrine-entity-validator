@@ -35,6 +35,11 @@ Validator checks by column type:
 - [Url](src/ColumnValidators/Url.php)
 - [Email](src/ColumnValidators/Email.php)
 
+## Events
+
+The `postValidate`(`EntityValidator::EVENT_POST_VALIDATE`) event triggers after successful validation, the syntax of
+listener method: `function (LifecycleEventArgs $args): void`.
+
 ## Examples
 
 Validates `Product` entity before insert/update data:

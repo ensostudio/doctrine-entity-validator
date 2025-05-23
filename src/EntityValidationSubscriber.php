@@ -36,7 +36,7 @@ class EntityValidationSubscriber implements EventSubscriber
      */
     public function prePersist(PrePersistEventArgs $args): void
     {
-        $validator = new EntityValidator($args->getObject(), $this->useValidatorCache);
+        $validator = new EntityValidator($args->getObject(), $this->useValidatorCache, $args->getObjectManager());
         $validator->validate();
     }
 
@@ -45,7 +45,7 @@ class EntityValidationSubscriber implements EventSubscriber
      */
     public function preUpdate(PreUpdateEventArgs $args): void
     {
-        $validator = new EntityValidator($args->getObject(), $this->useValidatorCache);
+        $validator = new EntityValidator($args->getObject(), $this->useValidatorCache, $args->getObjectManager());
         $validator->validate(true);
     }
 }

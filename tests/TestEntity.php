@@ -29,6 +29,9 @@ class TestEntity
     #[ORM\Column(type: Types::ENUM, enumType: TestEnum::class)]
     private $enumValue;
 
+    #[ORM\Column(type: Types::SIMPLE_ARRAY, length: 20)]
+    private array $arrayValue;
+
     public function getId(): int
     {
         return $this->id;
@@ -87,5 +90,15 @@ class TestEntity
     public function setEnumValue($enumValue): void
     {
         $this->enumValue = $enumValue;
+    }
+
+    public function getArrayValue(): array
+    {
+        return $this->arrayValue;
+    }
+
+    public function setArrayValue(array $arrayValue): void
+    {
+        $this->arrayValue = $arrayValue;
     }
 }

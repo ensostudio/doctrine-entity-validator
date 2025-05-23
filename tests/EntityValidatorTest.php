@@ -92,4 +92,32 @@ class EntityValidatorTest extends TestCase
         $this->entity->setEnumValue('x');
         $this->validator->validate();
     }
+
+    public function testValidateArrayWithWrongItemType(): void
+    {
+        $this->expectException(EntityValidationException::class);
+        $this->expectExceptionMessage('arrayValue has not scalar type of item');
+
+        $this->entity->setArrayValue(['str', 1, ['invalid']]);
+        $this->validator->validate();
+
+    }
+
+    public function testValidateArrayWithComma(): void
+    {
+        $this->expectException(EntityValidationException::class);
+        $this->expectExceptionMessage('arrayValue has item containing comma');
+
+        $this->entity->setArrayValue(['foo,bar,baz', 'valid']);
+        $this->validator->validate();
+    }
+
+    public function testValidateArrayWithWrongLength(): void
+    {
+        $this->expectException(EntityValidationException::class);
+        $this->expectExceptionMessage('arrayValue is too long (more than 20 characters)');
+
+        $this->entity->setArrayValue(['foo bar baz', 'very long text...']);
+        $this->validator->validate();
+    }
 }
